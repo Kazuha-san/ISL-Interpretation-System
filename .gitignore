@@ -1,6 +1,53 @@
+# Python
 __pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# Virtual Environment
 .venv/
+env/
+venv/
+ENV/
+
+# Environment variables
 .env
+.env.local
+.env.*.local
+
+# IDE
 .vscode/
+.idea/
+*.swp
+*.swo
+
+# Scripts
 Scripts/
 
+# Backend specific
+backend/app/__pycache__/
+backend/app/database/__pycache__/
+backend/app/models/__pycache__/
+backend/app/routers/__pycache__/
+backend/app/services/__pycache__/
+backend/app/utils/__pycache__/
+backend/scripts/__pycache__/
+backend/data/
+backend/assets/
+
+# Test files
+test_*.py
+*_test.py
+
+# Database files (SQLite)
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
