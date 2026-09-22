@@ -1,107 +1,103 @@
-# ISL Kiosk Translation - Backend
+# ISL Interpreter — Backend
 
-## Current Status: v0.1.0 (Initial Scaffolding)
+## Status: v0.5.0 — both pipelines scaffolded, Pipeline B waiting on a trained model
 
-### Overview
+Fully offline-capable. `GROQ_API_KEY` is optional everywhere — leave it
+blank in `.env` and the app runs entirely on the local rule-based gloss
+engine. SQLite (`data/isl.db`, WAL mode) is the only datastore; there is
+no cloud dependency anywhere in this codebase.
 
-This backend provides the API layer for an Indian Sign Language (ISL) kiosk translation system. The system converts Hindi/English transcripts into ISL gloss using the Groq API with Llama 3.1 8B.
+## Pipeline A — hearing → Deaf (`/translate`)
 
-### What's Implemented
+Working end to end for the 44-word pilot vocabulary:
 
-#### Core Infrastructure
-- ✅ FastAPI application with CORS middleware (Vite dev server at localhost:5173)
-- ✅ SQLite database with WAL mode for resilience
-- ✅ 50 vocabulary entries pre-seeded in the database
-- ✅ Environment configuration via `.env` file
+1. `POST /translate/forward` — transcript → gloss → avatar sequences.
+   Resolution order: approved cache → local rule engine (if confidence ≥0.85)
+   → Groq (only if `GROQ_API_KEY` set, 3s timeout) → local best-effort →
+   full fingerspell fallback. See `app/services/gloss.py`.
+2. `app/services/local_gloss.py` — deterministic ISL grammar rules
+   (topic-comment order, WH-word/negation moved to the end, articles and
+   copulas dropped), reading vocabulary from SQLite. No LLM required.
+3. `app/services/retrieval.py` — resolves gloss tokens to avatar keypoint
+   sequences. Currently returns `None` for every word (no `sign_clips`
+   rows exist yet — nothing has been seeded beyond the vocabulary table
+   itself). `MOCK_KEYPOINTS=true` only affects words that *do* have a
+   clip row; it does not fabricate clips that don't exist.
+4. `GET /vocabulary`, `GET /vocabulary/{id}` — lexicon lookup, includes
+   `has_clip` so the frontend can tell which words are actually playable.
 
-#### Services
-- ✅ **Gloss Service** (`app/services/gloss.py`)
-  - Converts Hindi/English to ISL gloss using Groq API
-  - Implements ISL grammar rules (topic-comment order, drops articles/copulas, etc.)
-  - Dynamic vocabulary mapping from database
-  - Supports context-aware conversion (general, banking, health, identity)
+**Blocked on:** real keypoint JSON per word. Once the ISLRTC-sourced
+extraction pipeline (discussed separately) produces `assets/clips/keypoints/{word}.json`
+files and `sign_clips` rows pointing at them, set `MOCK_KEYPOINTS=false`
+and Pipeline A is feature-complete for whatever vocabulary has been
+processed.
 
-#### Routers (Stubbed/Partial)
-- ✅ `/translate` - Full implementation with `/forward` and `/test` endpoints
-- ✅ `/vocabulary` - Health check stub
-- ✅ `/qna` - Health check stub
-- ✅ `/session` - Health check stub
-- ✅ `/sync` - Health check stub
+## Pipeline B — Deaf → hearing (`/recognize`)
 
-#### Models & Utilities
-- ✅ Empty model stubs for vocabulary, session, qna, staff
-- ✅ Service stubs for ASR, TTS, fingerspell, retrieval
-- ✅ Utility helper files ready for implementation
+Scaffolded, not functional yet — there is no trained recognition model
+to load, and nothing here fakes one.
 
-### What's Not Yet Implemented
+1. `app/routers/recognize.py` — WebSocket endpoint (`/recognize/ws`).
+   Only landmark frames travel over the wire, never video — the camera
+   and MediaPipe extraction are assumed to run client-side. Full wire
+   protocol is documented in the file's docstring.
+2. `app/services/recognition.py` — buffers incoming landmark frames per
+   connection. `SignRecognizer._run_inference()` raises `NotImplementedError`
+   deliberately — this is the exact spot to wire in a trained model once
+   one exists. Every other piece (buffering, the WebSocket protocol,
+   session logging, sentence assembly) is already built against the
+   return shape that method needs to produce.
+3. `app/services/gloss_to_text.py` — two-layer sentence assembly, mirroring
+   Pipeline A's approach: `assemble_sentence()` is rule-based (inverse of
+   `local_gloss.py`'s ordering) and always available offline;
+   `assemble_sentence_smart()` additionally asks Groq to naturalize that
+   draft when `GROQ_API_KEY` is set, falling back to the draft on any
+   failure or timeout. Every recognized sentence is still shown to the
+   signer for confirmation (`recognition_sessions.confirmed`) before it's
+   spoken — smoothing reduces how much editing that needs, it doesn't
+   remove the need for it.
+4. `recognition_sessions` table (`app/database/local_db.py`) — stores
+   every recognition attempt plus the signer's confirm/correct action.
+   This is also where training/eval data for a future model accumulates.
 
-- ❌ ASR (Automatic Speech Recognition) service for ISL fingerspelling
-- ❌ TTS (Text-to-Speech) service
-- ❌ Cloud database synchronization with Supabase
-- ❌ Session tracking and management
-- ❌ Q&A logging and retrieval
-- ❌ Staff progress tracking
+**Blocked on:** a trained isolated/continuous sign recognition model.
+Set `RECOGNIZER_MODEL_PATH` in `.env` and implement `_load_model()` /
+`_run_inference()` in `recognition.py` once one exists.
 
-### Database Schema
+## Other endpoints
 
-The `vocabulary` table contains:
-- `id` - Primary key
-- `word_en` - English word
-- `word_hi` - Hindi translation
-- `gloss_tag` - ISL gloss identifier (unique)
-- `category` - Word category (e.g., greetings, identity, documents)
+- `/session` — explicit session lifecycle (used by Pipeline B; Pipeline A
+  creates its own sessions inline per-request).
+- `/qna` — approved Q&A packs for a kiosk.
+- `/admin/cache` — approve/reject Groq-sourced cache entries before they're
+  trusted for future local hits.
 
-### Quick Start
+## Known placeholders (kept intentionally, not stubs left by accident)
 
-```bash
-# 1. Install dependencies
-pip install -r requirements.txt
+- `app/services/asr.py`, `app/services/tts.py` — empty on purpose. Speech
+  recognition and synthesis both run client-side via the browser's Web
+  Speech API; these exist only in case a future kiosk needs server-side
+  versions.
+- `app/models/staff.py` / `StaffProgressResponse` — model exists,
+  no router uses it yet (no staff-facing practice UI built yet).
+- `app/utils/helpers.py` — empty; nothing has needed a shared helper yet.
 
-# 2. Configure environment
+## Setup
+
+```
 cp .env.example .env
-# Edit .env with your GROQ_API_KEY and other settings
-
-# 3. Initialize database
+pip install -r requirements.txt
+python -m app.database.local_db     # creates data/isl.db with the current schema
+python -m scripts.seed_vocabulary   # loads assets/vocabulary/vocab.csv (44 words)
+python -m scripts.seed_quick_phrases  # optional: pre-computed staff quick-phrases
 python run.py
-# Database will be auto-initialized on startup
-
-# 4. Test endpoints
-curl http://localhost:8000/health
-curl http://localhost:8000/translate/test
 ```
 
-### API Endpoints
+## Security note
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/health` | Global health check |
-| GET | `/translate/health` | Translate service health |
-| POST | `/translate/forward` | Convert transcript to ISL gloss |
-| GET | `/translate/test` | Test translation with sample input |
-
-### Environment Variables
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `GROQ_API_KEY` | Yes | Groq API key for Llama 3.1 8B model |
-| `SUPABASE_URL` | No | Supabase project URL (for future cloud sync) |
-| `SUPABASE_KEY` | No | Supabase API key (for future cloud sync) |
-| `WHISPER_MODEL` | No | Whisper model for ASR (default: "base") |
-| `KIOSK_ID` | No | Kiosk identifier (default: "kiosk_dev_01") |
-| `KIOSK_LOCATION` | No | Kiosk location (default: "Development") |
-
-### Development Notes
-
-- The gloss service requires a valid Groq API key to function
-- Vocabulary IDs are fetched dynamically from the database on each request
-- ISL grammar rules are strictly applied in the gloss conversion prompt
-- The database schema is versioned and idempotent (safe to re-run)
-
-### Next Steps
-
-1. Implement ASR service for ISL fingerspelling recognition
-2. Implement TTS service for audio output
-3. Connect to Supabase for cloud synchronization
-4. Implement session tracking with kiosk integration
-5. Build Q&A logging and retrieval functionality
-6. Add staff progress tracking and analytics
+The `.env` that shipped in earlier working copies of this repo contained
+a live `GROQ_API_KEY` and Supabase credentials. Supabase is fully removed
+from the code (this app has never needed it since — SQLite only), but
+**rotate the Groq key** regardless — it was already outside version
+control's protection once, in a shared file. Deleting it from the repo
+doesn't undo that exposure.

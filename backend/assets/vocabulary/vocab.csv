@@ -1,0 +1,45 @@
+word_en,word_hi,gloss_tag,category,clip_filename
+hello,नमस्ते,HELLO,greetings,hello.mp4
+good_morning,सुप्रभात,GOOD_MORNING,greetings,good_morning.mp4
+thank_you,धन्यवाद,THANK_YOU,greetings,thank_you.mp4
+please,कृपया,PLEASE,greetings,please.mp4
+sorry,माफ़ करें,SORRY,greetings,sorry.mp4
+welcome,स्वागत है,WELCOME,greetings,welcome.mp4
+yes,हाँ,YES,greetings,yes.mp4
+no,नहीं,NO,greetings,no.mp4
+name,नाम,NAME,identity,name.mp4
+age,उम्र,AGE,identity,age.mp4
+address,पता,ADDRESS,identity,address.mp4
+id_card,पहचान पत्र,ID_CARD,identity,id_card.mp4
+date_of_birth,जन्म तिथि,DATE_OF_BIRTH,identity,date_of_birth.mp4
+male,पुरुष,MALE,identity,male.mp4
+female,महिला,FEMALE,identity,female.mp4
+wait,रुकिए,WAIT,counter_actions,wait.mp4
+next,अगला,NEXT,counter_actions,next.mp4
+help,मदद,HELP,counter_actions,help.mp4
+repeat,दोबारा,REPEAT,counter_actions,repeat.mp4
+understood,समझ गया,UNDERSTOOD,counter_actions,understood.mp4
+tomorrow,कल,TOMORROW,counter_actions,tomorrow.mp4
+form,फॉर्म,FORM,documents,form.mp4
+document,दस्तावेज़,DOCUMENT,documents,document.mp4
+certificate,प्रमाण पत्र,CERTIFICATE,documents,certificate.mp4
+photocopy,फोटोकॉपी,PHOTOCOPY,documents,photocopy.mp4
+photo,फोटो,PHOTO,documents,photo.mp4
+appointment,अपॉइंटमेंट,APPOINTMENT,documents,appointment.mp4
+receipt,रसीद,RECEIPT,documents,receipt.mp4
+one,एक,ONE,numbers,one.mp4
+two,दो,TWO,numbers,two.mp4
+three,तीन,THREE,numbers,three.mp4
+four,चार,FOUR,numbers,four.mp4
+five,पाँच,FIVE,numbers,five.mp4
+six,छह,SIX,numbers,six.mp4
+seven,सात,SEVEN,numbers,seven.mp4
+eight,आठ,EIGHT,numbers,eight.mp4
+nine,नौ,NINE,numbers,nine.mp4
+ten,दस,TEN,numbers,ten.mp4
+what,क्या,WHAT,questions,what.mp4
+where,कहाँ,WHERE,questions,where.mp4
+when,कब,WHEN,questions,when.mp4
+who,कौन,WHO,questions,who.mp4
+how_much,कितना,HOW_MUCH,questions,how_much.mp4
+which,कौनसा,WHICH,questions,which.mp4

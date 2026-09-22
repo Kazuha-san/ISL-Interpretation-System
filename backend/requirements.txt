@@ -8,4 +8,3 @@ python-dotenv>=1.0
 httpx>=0.26
 python-multipart>=0.0.6
 groq>=0.1
-supabase>=2.0

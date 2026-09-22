@@ -5,10 +5,15 @@ Implements the system prompt from gloss_prompt.md with vocabulary lookup.
 
 import json
 import asyncio
+import httpx
 import sqlite3
-from typing import Dict, List, Optional, TypedDict, Literal
+import logging
+from typing import Any, Dict, List, Optional, TypedDict, Literal
 from groq import Groq
 from app.config import settings
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 
 class GlossToken(TypedDict):
@@ -49,10 +54,9 @@ a fluent ISL signer would produce for the same meaning.
 ## AVAILABLE VOCABULARY (gloss_tags you may use)
 
 HELLO, GOOD_MORNING, THANK_YOU, PLEASE, SORRY, WELCOME, YES, NO,
-NAME, AGE, ADDRESS, ID, NUMBER, DATE_OF_BIRTH, MALE, FEMALE,
-WAIT, NEXT, SIGN_HERE, FILL_FORM, SUBMIT, TAKE_SEAT, COME_TOMORROW,
-HELP, REPEAT, UNDERSTOOD,
-FORM, DOCUMENT, CERTIFICATE, PHOTOCOPY, PHOTO, APPOINTMENT, RECEIPT, FEE,
+NAME, AGE, ADDRESS, ID_CARD, DATE_OF_BIRTH, MALE, FEMALE,
+WAIT, NEXT, HELP, REPEAT, UNDERSTOOD, TOMORROW,
+FORM, DOCUMENT, CERTIFICATE, PHOTOCOPY, PHOTO, APPOINTMENT, RECEIPT,
 ONE, TWO, THREE, FOUR, FIVE, SIX, SEVEN, EIGHT, NINE, TEN,
 WHAT, WHERE, WHEN, WHO, HOW_MUCH, WHICH
 
@@ -104,17 +108,30 @@ when a sentence is ambiguous between two valid options.
 """
     
     # Context sets for preference
+    # TODO: education context — currently uses general's empty override
+    # Decide on specific education-related vocabulary if needed
     CONTEXT_SETS = {
-        "banking": ["FORM", "DOCUMENT", "RECEIPT", "FEE", "NUMBER"],
+        "banking": ["FORM", "DOCUMENT", "RECEIPT"],
         "health": ["APPOINTMENT", "CERTIFICATE", "PHOTO"],
-        "identity": ["ID", "NAME", "AGE", "ADDRESS", "DATE_OF_BIRTH"],
+        "identity": ["ID_CARD", "NAME", "AGE", "ADDRESS", "DATE_OF_BIRTH"],
+        "education": [],  # Reuse general vocabulary for now
         "general": []
     }
     
     def __init__(self):
-        """Initialize Groq client with API key from settings."""
+        """Initialize Groq client with API key from settings.
+
+        Raises only when actually called without a key configured — callers
+        (convert_to_gloss_smart) check settings.groq_enabled first and skip
+        this path entirely when running offline, so this is a safeguard,
+        not the normal offline code path.
+        """
         if not settings.GROQ_API_KEY:
-            raise ValueError("GROQ_API_KEY is not set in configuration")
+            raise ValueError(
+                "GROQ_API_KEY is not set. This call path requires the online "
+                "Groq fallback; use convert_to_gloss_smart() instead, which "
+                "skips Groq automatically when no key is configured."
+            )
         self.client = Groq(api_key=settings.GROQ_API_KEY)
         self.model = "llama-3.1-8b-instant"  # Llama 3.1 8B as specified
     
@@ -218,3 +235,147 @@ async def convert_to_gloss(
     """Convenience function to convert transcript to gloss."""
     service = get_gloss_service()
     return await service.convert_to_gloss(transcript, context)
+
+
+# --- Smart gloss conversion with caching and offline support ---
+
+async def convert_to_gloss_smart(
+    transcript: str,
+    context: Literal["general", "banking", "health", "identity", "education"] = "general",
+    language: Literal["en", "hi"] = "en",
+) -> Dict[str, Any]:
+    """
+    Smart resolution order:
+    1. Exact match in resolved_phrases_cache (approved only)
+    2. Local rule engine, if confidence HIGH -> use directly
+    3. Groq, if reachable -> use its result, cache it (pending_review)
+    4. Local rule engine best-effort (if MEDIUM/LOW confidence and Groq unreachable)
+    5. Full fingerspell fallback (if local confidence was LOW and Groq unreachable)
+
+    Returns the normal GlossResult dict, PLUS extra debug/transparency fields:
+        "source": "cache" | "local_rule_engine" | "groq" | "fingerspell_fallback"
+        "confidence": float | None
+        "was_online": bool
+    """
+    from .local_gloss import convert_to_gloss_local
+    from ..database.local_db import cache_lookup, cache_upsert
+    
+    # Normalize transcript for cache lookup
+    def _normalize_for_cache(text: str) -> str:
+        import re
+        if language == "en":
+            text = re.sub(r'[^\w\s]', '', text)
+            text = text.lower()
+        else:
+            text = re.sub(r'[^\w\s\u0900-\u097F]', '', text)
+        text = re.sub(r'\s+', ' ', text)
+        return text.strip()
+    
+    normalized_input = _normalize_for_cache(transcript)
+    
+    # Step 1: Cache lookup (only approved entries)
+    cached = cache_lookup(normalized_input, context)
+    if cached:
+        try:
+            result = json.loads(cached["gloss_json"])
+            if isinstance(result, dict) and "gloss" in result and "tokens" in result:
+                cache_upsert(normalized_input, context, cached["gloss_json"], "groq")  # Update hit count
+                return {
+                    **result,
+                    "source": "cache",
+                    "confidence": None,
+                    "was_online": False
+                }
+        except json.JSONDecodeError:
+            logger.warning(f"Cache entry for '{normalized_input}' is malformed, skipping")
+    
+    # Step 2: Local rule engine (high confidence path)
+    local_result = convert_to_gloss_local(transcript, language)
+    if local_result["confidence"] >= 0.85:
+        gloss_json = json.dumps(local_result["result"])
+        cache_upsert(normalized_input, context, gloss_json, "local_rule_engine")
+        return {
+            **local_result["result"],
+            "source": "local_rule_engine",
+            "confidence": local_result["confidence"],
+            "was_online": False
+        }
+    
+    # Step 3: Groq attempt (only reached if local confidence < 0.85, and only
+    # if a key is configured — this app must fully work with GROQ_API_KEY unset)
+    GROQ_TIMEOUT_SECONDS = 3.0
+    was_online = False
+
+    if settings.groq_enabled:
+        was_online = True
+        try:
+            from .gloss import convert_to_gloss as groq_convert
+            result = await asyncio.wait_for(
+                groq_convert(transcript, context),
+                timeout=GROQ_TIMEOUT_SECONDS
+            )
+
+            # Cache Groq result as pending_review
+            gloss_json = json.dumps(result)
+            cache_upsert(normalized_input, context, gloss_json, "groq")
+
+            return {
+                **result,
+                "source": "groq",
+                "confidence": None,
+                "was_online": True
+            }
+
+        except (httpx.ConnectError, httpx.TimeoutException, asyncio.TimeoutError):
+            # Genuine offline / unreachable
+            was_online = False
+            logger.info(f"Groq unreachable, falling back to local rule engine for '{normalized_input}'")
+        except Exception as e:
+            # Some other failure (bad key, malformed response, etc.)
+            logger.error(f"Groq call failed for non-connectivity reason: {e}")
+            was_online = False
+    else:
+        logger.debug("GROQ_API_KEY not configured — skipping online fallback, using local engine only")
+    
+    # Step 4: Local best-effort (if Groq was unreachable or failed)
+    # Use local result regardless of confidence
+    if local_result["confidence"] >= 0.5:
+        gloss_json = json.dumps(local_result["result"])
+        cache_upsert(normalized_input, context, gloss_json, "local_rule_engine")
+        return {
+            **local_result["result"],
+            "source": "local_rule_engine",
+            "confidence": local_result["confidence"],
+            "was_online": was_online
+        }
+    
+    # Step 5: Full fingerspell fallback (if local confidence < 0.5 and Groq unreachable)
+    # Fingerspell the entire original transcript word-by-word
+    tokens_list = []
+    gloss_tags = []
+    
+    if language == "en":
+        import re
+        normalized = re.sub(r'[^\w\s]', '', transcript).lower()
+        words = normalized.split()
+    else:
+        import re
+        normalized = re.sub(r'[^\w\s\u0900-\u097F]', '', transcript)
+        words = normalized.split()
+    
+    for word in words:
+        tokens_list.append({
+            "word": word,
+            "type": "fingerspell",
+            "vocab_id": None,
+            "source_word": word
+        })
+        gloss_tags.append(word)
+    
+    return {
+        "gloss": gloss_tags,
+        "tokens": tokens_list,
+        "source": "fingerspell_fallback",
+        "confidence": local_result["confidence"],
+        "was_online": was_online
+    }

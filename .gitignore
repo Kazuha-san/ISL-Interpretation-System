@@ -1,4 +1,8 @@
-# Python
+# ==============================================================================
+# PYTHON & BUILD ARTIFACTS (compiler output, packaging)
+# ==============================================================================
+# Ignored: Python bytecode, compiled extensions, and build artifacts
+# These are generated from source .py files and should never be committed
 __pycache__/
 *.py[cod]
 *$py.class
@@ -8,27 +12,40 @@ __pycache__/
 dist/
 build/
 
-# Virtual Environment
+# ==============================================================================
+# VIRTUAL ENVIRONMENTS (isolated Python dependencies)
+# ==============================================================================
+# Ignored: Local Python virtual environments with installed packages
+# Dependencies are listed in requirements.txt; environments are recreatable
 .venv/
 env/
 venv/
 ENV/
 
-# Environment variables
+# ==============================================================================
+# SECRETS & SENSITIVE CONFIG (credentials, API keys)
+# ==============================================================================
+# Ignored: Files containing real secrets that should never be committed
+# Use .env.example as a template; secrets are environment-specific
 .env
 .env.local
 .env.*.local
 
-# IDE
+# ==============================================================================
+# IDE & EDITOR FILES (local user settings)
+# ==============================================================================
+# Ignored: IDE-specific configuration and temporary files
+# These are user-specific and break portability when committed
 .vscode/
 .idea/
 *.swp
 *.swo
 
-# Scripts
-Scripts/
-
-# Backend specific
+# ==============================================================================
+# BACKEND: CACHE & DATABASE (runtime data, not source)
+# ==============================================================================
+# Ignored: Python bytecode caches inside app subdirectories
+# Recreated automatically on import; saves no meaningful history
 backend/app/__pycache__/
 backend/app/database/__pycache__/
 backend/app/models/__pycache__/
@@ -36,18 +53,68 @@ backend/app/routers/__pycache__/
 backend/app/services/__pycache__/
 backend/app/utils/__pycache__/
 backend/scripts/__pycache__/
+
+# Ignored: Runtime SQLite database folder
+# Contains local-only data (isl.db); database schema is in models
 backend/data/
-backend/assets/
 
-# Test files
-test_*.py
-*_test.py
+# ==============================================================================
+# BACKEND: ASSETS (media files - selective ignore)
+# ==============================================================================
+# Ignored: Raw video clips (large binaries, regenerateable)
+# These are source media for preprocessing; regenerate via MediaPipe script
+backend/assets/clips/raw/**/*.mp4
 
-# Database files (SQLite)
+# Ignored: Avatar 3D model files (large binary assets)
+# These are external 3D models; replace with your own license-compliant assets
+backend/assets/avatar/model/*.glb
+
+# Ignored: Fingerspell video clips (large binary assets)
+# Generated from raw video; not human-readable source code
+backend/assets/fingerspell/*.mp4
+
+# Trackable: Vocabulary CSV and keypoint JSON files
+# vocab.csv is source data (word list); keypoint JSONs are text-based pipeline outputs
+# !backend/assets/vocabulary/vocab.csv
+# !backend/assets/clips/keypoints/*.json
+# NOTE: Above negation patterns are NOT used - we explicitly whitelist by not ignoring them
+# Since backend/assets/ is NOT blanket-ignored, these remain trackable by default
+
+# ==============================================================================
+# TEST FILES (optional - uncomment if you don't want tests in export)
+# ==============================================================================
+# test_*.py
+# *_test.py
+
+# ==============================================================================
+# DATABASE FILES (SQLite - alternative pattern for runtime data)
+# ==============================================================================
+# Ignored: All database files anywhere in repo
+# These are runtime state, not schema; schema lives in app/models
 *.db
 *.sqlite
 *.sqlite3
 
-# Logs
+# ==============================================================================
+# LOG FILES (runtime output)
+# ==============================================================================
+# Ignored: Log files containing runtime output and errors
+# Logs are environment-specific and grow unbounded
 *.log
 logs/
+
+# ==============================================================================
+# SPECIFIC BACKEND FILES & FOLDERS (explicit overrides)
+# ==============================================================================
+# Trackable: Seed script (source code)
+# seed_vocabulary.py is Python source; should be committed for reproducibility
+# !backend/scripts/seed_vocabulary.py
+
+# Trackable: Environment template (no real secrets)
+# .env.example documents required env vars without exposing real values
+# !.env.example
+
+# Trackable: README files and config (documentation)
+# README.md, requirements.txt, config files are always trackable by default
+# !README.md
+# !requirements.txt
